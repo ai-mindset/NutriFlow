@@ -1,0 +1,41 @@
+{
+	"name": "nutriflow",
+	"version": "1.0.0",
+	"description": "Functional plant-based meal planner for body recomposition",
+	"main": "nutriflow.ts",
+	"type": "module",
+	"tasks": {
+		"start": "deno run --allow-net --allow-read --allow-write nutriflow.ts",
+		"dev": "deno run --allow-net --allow-read --allow-write --watch nutriflow.ts",
+		"test": "deno test --allow-net --allow-read --allow-write tests/",
+		"check": "deno check nutriflow.ts",
+		"lint": "deno lint",
+		"fmt": "deno fmt",
+		"compile-linux": "deno compile --allow-net --allow-read --allow-write --target x86_64-unknown-linux-gnu --output nutriflow-linux nutriflow.ts",
+		"compile-mac": "deno compile --allow-net --allow-read --allow-write --target x86_64-apple-darwin --output nutriflow-mac nutriflow.ts",
+		"compile-windows": "deno compile --allow-net --allow-read --allow-write --target x86_64-pc-windows-msvc --output nutriflow-windows.exe nutriflow.ts",
+		"build-all": "deno task compile-linux && deno task compile-mac && deno task compile-windows"
+	},
+	"lint": {
+		"rules": {
+			"tags": ["recommended"]
+		}
+	},
+	"fmt": {
+		"useTabs": false,
+		"lineWidth": 100,
+		"indentWidth": 2,
+		"semiColons": true,
+		"singleQuote": false
+	},
+	"compilerOptions": {
+		"strict": true,
+		"noImplicitAny": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true
+	},
+	"imports": {
+		"@cliffy/": "https://deno.land/x/cliffy@v1.0.0-rc.4/",
+		"@std/": "https://deno.land/std@0.208.0/"
+	}
+}
