@@ -5,16 +5,16 @@
  * Simple, robust, privacy-first TUI for body recomposition nutrition
  */
 
-import { Confirm, Input, Select } from "https://deno.land/x/cliffy@v1.0.0-rc.4/prompt/mod.ts";
-import { Table } from "https://deno.land/x/cliffy@v1.0.0-rc.4/table/mod.ts";
-import { colors } from "https://deno.land/x/cliffy@v1.0.0-rc.4/ansi/colors.ts";
+import { Confirm, Input, Select } from "@cliffy/prompt/mod.ts";
+import { Table } from "@cliffy/table/mod.ts";
+import { colors } from "@cliffy/ansi/colors.ts";
 
 // =============================================================================
 // TYPES & CONSTANTS
 // =============================================================================
 
 type ActivityLevel = "sedentary" | "low" | "moderate" | "high";
-type Goal = "recomp" | "maintain";
+type Goal = "recomp" | "maintain" | "gain";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 interface Profile {
@@ -99,7 +99,7 @@ const CONFIG = {
   CACHE_SIZE: 50,
 } as const;
 
-const OFF_API_BASE = "https://world.openfoodfacts.net/api/v2";
+const OFF_API_BASE = "https://world.openfoodfacts.org/api/v2";
 
 // =============================================================================
 // VALIDATION FUNCTIONS
@@ -178,43 +178,43 @@ const FALLBACK_FOODS: ReadonlyArray<Food> = [
   },
   {
     name: "Tempeh",
-    protein: 19.0,
-    carbs: 9.4,
-    fat: 11.4,
-    fiber: 9.0,
-    calories: 190,
+    protein: 21.3,
+    carbs: 1.8,
+    fat: 10.9,
+    fiber: 6.1,
+    calories: 208,
   },
   {
-    name: "Lentils, cooked",
-    protein: 9.0,
-    carbs: 20.0,
-    fat: 0.4,
-    fiber: 7.9,
-    calories: 116,
+    name: "Green lentils in water",
+    protein: 6,
+    carbs: 12,
+    fat: 0.5,
+    fiber: 4.1,
+    calories: 82,
   },
   {
-    name: "Chickpeas, cooked",
-    protein: 8.9,
-    carbs: 27.4,
-    fat: 2.6,
-    fiber: 7.6,
-    calories: 164,
+    name: "Chickpeas in water",
+    protein: 7.2,
+    carbs: 23.4,
+    fat: 2.2,
+    fiber: 7.4,
+    calories: 127,
   },
   {
-    name: "Hemp seeds",
-    protein: 31.6,
-    carbs: 8.7,
-    fat: 48.8,
-    fiber: 4.0,
-    calories: 553,
+    name: "Shelled Hemp",
+    protein: 35,
+    carbs: 1.1,
+    fat: 52,
+    fiber: 4.5,
+    calories: 617,
   },
   {
     name: "Nutritional yeast",
-    protein: 45.0,
-    carbs: 35.0,
-    fat: 5.0,
-    fiber: 20.0,
-    calories: 325,
+    protein: 50.6,
+    carbs: 10,
+    fat: 4.8,
+    fiber: 23.2,
+    calories: 332,
   },
 ] as const;
 
@@ -261,9 +261,8 @@ const searchOpenFoodFacts = async (
 
   try {
     const searchUrl = new URL(`${OFF_API_BASE}/search`);
-    searchUrl.searchParams.set("search_terms", query);
-    searchUrl.searchParams.set("categories_tags_en", "plant-based-foods");
-    searchUrl.searchParams.set("fields", "product_name,nutriments,nova_group");
+    searchUrl.searchParams.set("categories_tags_en", query);
+    searchUrl.searchParams.set("fields", "product_name,nutriments");
     searchUrl.searchParams.set("page_size", "20");
 
     const response = await withTimeout(
@@ -276,17 +275,15 @@ const searchOpenFoodFacts = async (
     const data: OpenFoodFactsResponse = await response.json();
     const products = data.products || [];
 
-    // Filter for minimally processed foods (NOVA group 1-2) and high protein/fiber
     const foods = products
       .map(parseOpenFoodFactsProduct)
       .filter((food: Food | null): food is Food =>
         food !== null &&
-        (food.protein >= 8 || food.fiber >= 5) && // High protein OR high fiber
-        food.calories > 0
+        food.calories > 0 &&
+        (food.protein >= 3 || food.fiber >= 3) // Basic nutrition filter
       )
       .slice(0, 15);
 
-    // Cache with size limit
     if (foodCache.size >= CONFIG.CACHE_SIZE) {
       const firstKey = foodCache.keys().next().value;
       foodCache.delete(firstKey);
@@ -295,7 +292,6 @@ const searchOpenFoodFacts = async (
 
     return foods;
   } catch (error) {
-    log.warn(`API search failed: ${(error as Error).message}, using fallback`);
     return searchFallbackFoods(query);
   }
 };
@@ -424,7 +420,7 @@ const buildPrompt = (targets: Targets, prefs: string[], maxTime: number): string
 EXACT NUTRITIONAL TARGETS (must be met):
 - Total daily calories: ${targets.calories} kcal
 - Total daily protein: ${targets.protein}g
-- Total daily carbs: ${targets.carbs}g  
+- Total daily carbs: ${targets.carbs}g
 - Total daily fat: ${targets.fat}g
 - Total daily fiber: ${targets.fiber}g
 
@@ -444,7 +440,7 @@ REQUIRED FOODS TO EMPHASIZE:
 
 COOKING CONSTRAINTS:
 - Breakfast: Raw or one-pan maximum
-- Lunch: One-pot or one-tray maximum  
+- Lunch: One-pot or one-tray maximum
 - Dinner: One-pot, one-pan, or one-tray maximum
 - Simple techniques only: sauté, steam, roast, boil, or raw
 
@@ -480,11 +476,28 @@ const parseMeals = (response: string): Promise<ReadonlyArray<Meal> | null> => {
     if (!lastLine) return Promise.resolve(null);
 
     const data: OllamaResponse = JSON.parse(lastLine);
-    const aiResponse = data.response || "";
+    let aiResponse = data.response || "";
 
-    // Now parse the actual meal plan from the AI response
+    // Clean up HTML entities and escape sequences
+    aiResponse = aiResponse
+      .replace(/\\u0026/g, '&')
+      .replace(/\\u003c/g, '<')
+      .replace(/\\u003e/g, '>')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+
+    // Extract JSON from markdown code blocks if present
+    const codeBlockMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      aiResponse = codeBlockMatch[1];
+    }
+
+    // Extract JSON object
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return Promise.resolve(null);
+    if (!jsonMatch) {
+      console.log("DEBUG: No JSON found in response:", aiResponse.slice(0, 200));
+      return Promise.resolve(null);
+    }
 
     const mealData: MealPlanJSON = JSON.parse(jsonMatch[0]);
     if (!mealData.meals || !Array.isArray(mealData.meals)) {
@@ -511,11 +524,11 @@ const parseMeals = (response: string): Promise<ReadonlyArray<Meal> | null> => {
     })).then((meals) => meals.slice(0, 6));
   } catch (error) {
     console.log("DEBUG: Parse error:", (error as Error).message);
-    console.log("DEBUG: Response was:", response.slice(0, 200));
+    console.log("DEBUG: Full response length:", response.length);
+    console.log("DEBUG: Full response:", response);
     return Promise.resolve(null);
   }
 };
-
 const generateFallbackMeals = async (
   maxTime: number,
 ): Promise<ReadonlyArray<Meal>> => {
@@ -732,6 +745,7 @@ const setupProfile = async (): Promise<Profile> => {
     options: [
       { name: "Body recomposition (lose fat, gain muscle)", value: "recomp" },
       { name: "Maintain current composition", value: "maintain" },
+      { name: "Gain muscle", value: "gain" },
     ],
   }) as Goal;
 
